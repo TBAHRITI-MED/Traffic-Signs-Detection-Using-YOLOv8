@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Video Results</title>
+</head>
+<body>
+    <h1>Video Results</h1>
+    <video controls>
+        <source src="{{ url_for('static', filename=filename) }}" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    <br>
+    <a href="{{ url_for('upload') }}">Upload another video</a>
+</body>
+</html>
