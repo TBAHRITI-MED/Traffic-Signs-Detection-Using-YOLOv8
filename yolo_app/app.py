@@ -1,20 +1,27 @@
-
-
-from flask import Flask, render_template, request, redirect, url_for, Response
+from flask import Flask, render_template, request, redirect, url_for, send_file
 import os
-import cv2
 from ultralytics import YOLO
+import glob
 
 app = Flask(__name__)
 
-# modèle YOLO
-model = YOLO('/Users/mohammedtbahriti/Documents/TRAFIC_DETECTION/runs/detect/train/weights/best (1).pt')
+UPLOAD_FOLDER = 'uploads'
+RESULTS_FOLDER = 'runs/detect'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
-# sauvegarder les fichiers téléchargés
-UPLOAD_FOLDER = '/Users/mohammedtbahriti/Documents/python/yolo_app/uploads'
-RESULTS_FOLDER = '/Users/mohammedtbahriti/Documents/python/yolo_app/runs/detect'
+model = YOLO('../runs/detect/train/weights/best.pt')
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+ 
+def get_predicted_image_path(original_filename):
+    predict_dir = os.path.join(RESULTS_FOLDER, 'predict')
+    pattern = os.path.join(predict_dir, f"{os.path.splitext(original_filename)[0]}*")
+    matches = glob.glob(pattern)
+    return matches[0] if matches else None
 
 @app.route('/')
 def index():
@@ -23,50 +30,42 @@ def index():
 @app.route('/upload', methods=['POST'])
 def upload():
     if 'file' not in request.files:
-        return redirect(request.url)
+        return redirect(url_for('index'))
     
-    uploaded_file = request.files['file']
+    file = request.files['file']
+    if file.filename == '' or not allowed_file(file.filename):
+        return redirect(url_for('index'))
+
+    input_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(input_path)
     
-    if uploaded_file.filename == '':
-        return redirect(request.url)
-
-    # Sauvegarder le fichier téléchargé
-    file_path = os.path.join(UPLOAD_FOLDER, uploaded_file.filename)
-    uploaded_file.save(file_path)
-
-    # Effectuer la détection
-    results = model.predict(source=file_path, save=True)
-
-    # Renvoie le nom de la vidéo ou photo avec les résultats
-    output_file_name = os.path.basename(file_path)  # Nom du fichier d'origine
-    return redirect(url_for('show_results', filename=output_file_name))
+    results = model.predict(source=input_path, save=True)
+    
+    return redirect(url_for('results', filename=file.filename))
 
 @app.route('/results/<filename>')
-def show_results(filename):
-    # Le fichier de résultats
-    result_file_path = os.path.join(RESULTS_FOLDER, filename)
-    return render_template('results.html', filename=result_file_path)
+def results(filename):
+    predicted_path = get_predicted_image_path(filename)
+    if predicted_path is None:
+        return "Image non trouvée", 404
+    
+    return render_template('results.html', 
+                         image=f'/results/image/{filename}',
+                         download_url=f'/download/{filename}')
 
-@app.route('/video_feed')
-def video_feed():
-    # Initialiser la capture vidéo à partir de la webcam
-    cap = cv2.VideoCapture(0)  
+@app.route('/results/image/<filename>')
+def serve_image(filename):
+    predicted_path = get_predicted_image_path(filename)
+    if predicted_path is None:
+        return "Image non trouvée", 404
+    return send_file(predicted_path)
 
-    def generate_frames():
-        while True:
-            success, frame = cap.read()  # Lire une frame
-            if not success:
-                break
-            else:
-                # Encodez la frame en JPEG
-                ret, buffer = cv2.imencode('.jpg', frame)
-                frame = buffer.tobytes()
-                
-                # pour le streaming
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+@app.route('/download/<filename>')
+def download(filename):
+    predicted_path = get_predicted_image_path(filename)
+    if predicted_path is None:
+        return "Image non trouvée", 404
+    return send_file(predicted_path, as_attachment=True)
 
 if __name__ == '__main__':
     app.run(debug=True)
